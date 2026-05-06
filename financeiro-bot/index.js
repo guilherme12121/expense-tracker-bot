@@ -1,24 +1,32 @@
 // ============================================================
-//  CONTROLE FINANCEIRO — Node.js + Polling
-//  Processa TODAS as mensagens, sem perder nenhuma.
+//  CONTROLE FINANCEIRO — Node.js + Polling + Anti-hibernação
 // ============================================================
 
-const TelegramBot  = require("node-telegram-bot-api");
+const TelegramBot    = require("node-telegram-bot-api");
 const { GoogleAuth } = require("google-auth-library");
-const { google }   = require("googleapis");
-const fetch        = require("node-fetch");
-const fs           = require("fs");
+const { google }     = require("googleapis");
+const fetch          = require("node-fetch");
+const http           = require("http");
 
-// ── Configurações (lidas das variáveis de ambiente) ──────────
+// ── Variáveis de ambiente ────────────────────────────────────
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ID_PLANILHA    = process.env.ID_PLANILHA;
-const GOOGLE_CREDS   = process.env.GOOGLE_CREDS; // JSON da service account
+const GOOGLE_CREDS   = process.env.GOOGLE_CREDS;
 
 if (!TELEGRAM_TOKEN || !GEMINI_API_KEY || !ID_PLANILHA || !GOOGLE_CREDS) {
-  console.error("❌ Variáveis de ambiente faltando. Verifique TELEGRAM_TOKEN, GEMINI_API_KEY, ID_PLANILHA, GOOGLE_CREDS");
+  console.error("❌ Variáveis de ambiente faltando.");
   process.exit(1);
 }
+
+// ── Servidor HTTP — mantém o Render acordado ─────────────────
+// O Render exige uma porta aberta para não hibernar.
+// Este servidor só responde "OK" em qualquer rota.
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end("OK");
+}).listen(PORT, () => console.log(`🌐 Servidor HTTP na porta ${PORT}`));
 
 // ── Autenticação Google Sheets ───────────────────────────────
 const credentials = JSON.parse(GOOGLE_CREDS);
@@ -28,10 +36,9 @@ const auth = new GoogleAuth({
 });
 const sheets = google.sheets({ version: "v4", auth });
 
-// ── Bot com polling ──────────────────────────────────────────
+// ── Bot Telegram com polling ─────────────────────────────────
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
-
-console.log("✅ Bot iniciado com polling.");
+console.log("✅ Bot iniciado.");
 
 // ── Mapa de categorias ───────────────────────────────────────
 const MAPA_CATEGORIAS = {
@@ -181,15 +188,15 @@ const NOMES_MESES = [
 
 // ── Helpers ──────────────────────────────────────────────────
 function getNomeMesAtual() {
-  const agora = new Date();
-  agora.setHours(agora.getHours() - 3);
-  return NOMES_MESES[agora.getMonth()];
+  const d = new Date();
+  d.setHours(d.getHours() - 3);
+  return NOMES_MESES[d.getMonth()];
 }
 
 function getDataAtual() {
-  const agora = new Date();
-  agora.setHours(agora.getHours() - 3);
-  return `${String(agora.getDate()).padStart(2,"0")}/${String(agora.getMonth()+1).padStart(2,"0")}/${agora.getFullYear()}`;
+  const d = new Date();
+  d.setHours(d.getHours() - 3);
+  return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
 }
 
 function semAcentos(str) {
@@ -215,17 +222,13 @@ function parseValor(valorStr) {
 
 // ── Google Sheets ────────────────────────────────────────────
 async function garantirAba(nomeMes) {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId: ID_PLANILHA });
+  const meta   = await sheets.spreadsheets.get({ spreadsheetId: ID_PLANILHA });
   const existe = meta.data.sheets.some(s => s.properties.title === nomeMes);
-
   if (!existe) {
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: ID_PLANILHA,
-      requestBody: {
-        requests: [{ addSheet: { properties: { title: nomeMes } } }]
-      }
+      requestBody: { requests: [{ addSheet: { properties: { title: nomeMes } } }] }
     });
-    // Cabeçalho
     await sheets.spreadsheets.values.update({
       spreadsheetId: ID_PLANILHA,
       range: `${nomeMes}!A1:F1`,
@@ -236,12 +239,13 @@ async function garantirAba(nomeMes) {
 }
 
 async function proximaLinhaVazia(nomeMes) {
-  const res = await sheets.spreadsheets.values.get({
+  const res  = await sheets.spreadsheets.values.get({
     spreadsheetId: ID_PLANILHA,
     range: `${nomeMes}!A2:A500`,
   });
   const rows = res.data.values || [];
-  return rows.findIndex(r => !r[0] || r[0].trim() === "") + 2;
+  const idx  = rows.findIndex(r => !r[0] || r[0].trim() === "");
+  return idx === -1 ? -1 : idx + 2;
 }
 
 async function gravarLinha(nomeMes, linha, valores) {
@@ -255,18 +259,15 @@ async function gravarLinha(nomeMes, linha, valores) {
 
 // ── Gemini ───────────────────────────────────────────────────
 async function processarImagemComGemini(fileId) {
-  // 1. Obtém path do arquivo
   const fileRes  = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${fileId}`);
   const fileJson = await fileRes.json();
   if (!fileJson.ok) throw new Error("Arquivo não encontrado no Telegram.");
 
-  // 2. Baixa a imagem como buffer
-  const imgRes  = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileJson.result.file_path}`);
-  const imgBuf  = await imgRes.buffer();
-  const base64  = imgBuf.toString("base64");
-  const mime    = imgRes.headers.get("content-type") || "image/jpeg";
+  const imgRes = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileJson.result.file_path}`);
+  const imgBuf = await imgRes.buffer();
+  const base64 = imgBuf.toString("base64");
+  const mime   = imgRes.headers.get("content-type") || "image/jpeg";
 
-  // 3. Chama Gemini
   const body = {
     contents: [{ parts: [
       { text:
@@ -281,23 +282,19 @@ async function processarImagemComGemini(fileId) {
     generationConfig: { temperature: 0, maxOutputTokens: 60 }
   };
 
-  const res     = await fetch(
+  const res    = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
   );
-  const json    = await res.json();
+  const json   = await res.json();
   if (json.error) throw new Error("Gemini: " + json.error.message);
   if (!json.candidates?.[0]?.content) throw new Error("Gemini retornou vazio.");
   return json.candidates[0].content.parts[0].text.trim();
 }
 
-// ── Handler principal ────────────────────────────────────────
-// Cada mensagem é processada de forma independente e paralela.
-// Não há lock — o Node.js é single-thread e a planilha
-// suporta múltiplas writes sequenciais via API.
+// ── Handler de mensagens ─────────────────────────────────────
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
-
   try {
     let textoFinal = "";
     const ehImagem = msg.photo || msg.document;
@@ -321,7 +318,6 @@ bot.on("message", async (msg) => {
     if (!textoFinal) return;
     textoFinal = textoFinal.replace(/\r?\n/g, " ").replace(/\s{2,}/g, " ").trim();
 
-    // Parse
     const partes = textoFinal.split(",");
     if (partes.length < 3) {
       await bot.sendMessage(chatId,
@@ -341,22 +337,21 @@ bot.on("message", async (msg) => {
     }
 
     const { cat: categoria, tipo } = resolverCategoria(inputCat);
-    const nomeMes  = getNomeMesAtual();
-    const dataStr  = getDataAtual();
+    const nomeMes = getNomeMesAtual();
+    const dataStr = getDataAtual();
 
     await garantirAba(nomeMes);
     const linha = await proximaLinhaVazia(nomeMes);
 
-    if (linha <= 0) {
+    if (linha === -1) {
       await bot.sendMessage(chatId, `❌ Planilha de ${nomeMes} cheia! Adicione mais linhas.`);
       return;
     }
 
     await gravarLinha(nomeMes, linha, [dataStr, categoria, item, valor, tipo, ""]);
 
-    const emoji = tipo === "Entrada" ? "💰" : "💸";
     await bot.sendMessage(chatId,
-      `${emoji} Lançado!\n\n` +
+      `${tipo === "Entrada" ? "💰" : "💸"} Lançado!\n\n` +
       `📁 ${categoria} › ${item}\n` +
       `💵 R$ ${valor.toFixed(2).replace(".", ",")}\n` +
       `📅 ${dataStr} (${nomeMes})`
