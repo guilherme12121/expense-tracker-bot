@@ -8,7 +8,6 @@ const { google }     = require("googleapis");
 const fetch          = require("node-fetch");
 const http           = require("http");
 
-// ── Variáveis de ambiente ────────────────────────────────────
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ID_PLANILHA    = process.env.ID_PLANILHA;
@@ -19,16 +18,12 @@ if (!TELEGRAM_TOKEN || !GEMINI_API_KEY || !ID_PLANILHA || !GOOGLE_CREDS) {
   process.exit(1);
 }
 
-// ── Servidor HTTP — mantém o Render acordado ─────────────────
-// O Render exige uma porta aberta para não hibernar.
-// Este servidor só responde "OK" em qualquer rota.
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200);
   res.end("OK");
 }).listen(PORT, () => console.log(`🌐 Servidor HTTP na porta ${PORT}`));
 
-// ── Autenticação Google Sheets ───────────────────────────────
 const credentials = JSON.parse(GOOGLE_CREDS);
 const auth = new GoogleAuth({
   credentials,
@@ -36,18 +31,14 @@ const auth = new GoogleAuth({
 });
 const sheets = google.sheets({ version: "v4", auth });
 
-// ── Bot Telegram com polling ─────────────────────────────────
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 console.log("✅ Bot iniciado.");
 
-// ── Mapa de categorias ───────────────────────────────────────
 const MAPA_CATEGORIAS = {
-  // ENTRADAS
   "salario":        { cat: "Salário",      tipo: "Entrada" },
   "renda":          { cat: "Salário",      tipo: "Entrada" },
   "freelance":      { cat: "Salário",      tipo: "Entrada" },
   "entrada":        { cat: "Salário",      tipo: "Entrada" },
-  // MERCADO
   "mercado":        { cat: "Mercado",      tipo: "Saída" },
   "supermercado":   { cat: "Mercado",      tipo: "Saída" },
   "hortifruti":     { cat: "Mercado",      tipo: "Saída" },
@@ -60,7 +51,6 @@ const MAPA_CATEGORIAS = {
   "assai":          { cat: "Mercado",      tipo: "Saída" },
   "extra":          { cat: "Mercado",      tipo: "Saída" },
   "atacadao":       { cat: "Mercado",      tipo: "Saída" },
-  // FARMÁCIA
   "farmacia":       { cat: "Farmácia",     tipo: "Saída" },
   "drogaria":       { cat: "Farmácia",     tipo: "Saída" },
   "drogasil":       { cat: "Farmácia",     tipo: "Saída" },
@@ -77,7 +67,6 @@ const MAPA_CATEGORIAS = {
   "unimed":         { cat: "Farmácia",     tipo: "Saída" },
   "academia":       { cat: "Farmácia",     tipo: "Saída" },
   "smartfit":       { cat: "Farmácia",     tipo: "Saída" },
-  // TRANSPORTE
   "transporte":     { cat: "Transporte",   tipo: "Saída" },
   "combustivel":    { cat: "Transporte",   tipo: "Saída" },
   "gasolina":       { cat: "Transporte",   tipo: "Saída" },
@@ -94,7 +83,6 @@ const MAPA_CATEGORIAS = {
   "ipva":           { cat: "Transporte",   tipo: "Saída" },
   "pneu":           { cat: "Transporte",   tipo: "Saída" },
   "99":             { cat: "Transporte",   tipo: "Saída" },
-  // RESTAURANTE
   "restaurante":    { cat: "Restaurante",  tipo: "Saída" },
   "lanchonete":     { cat: "Restaurante",  tipo: "Saída" },
   "hamburger":      { cat: "Restaurante",  tipo: "Saída" },
@@ -113,7 +101,6 @@ const MAPA_CATEGORIAS = {
   "jantar":         { cat: "Restaurante",  tipo: "Saída" },
   "lanche":         { cat: "Restaurante",  tipo: "Saída" },
   "comida":         { cat: "Restaurante",  tipo: "Saída" },
-  // LAZER
   "lazer":          { cat: "Lazer",        tipo: "Saída" },
   "cinema":         { cat: "Lazer",        tipo: "Saída" },
   "teatro":         { cat: "Lazer",        tipo: "Saída" },
@@ -134,7 +121,6 @@ const MAPA_CATEGORIAS = {
   "zara":           { cat: "Lazer",        tipo: "Saída" },
   "cea":            { cat: "Lazer",        tipo: "Saída" },
   "jogo":           { cat: "Lazer",        tipo: "Saída" },
-  // ASSINATURA
   "assinatura":     { cat: "Assinatura",   tipo: "Saída" },
   "netflix":        { cat: "Assinatura",   tipo: "Saída" },
   "spotify":        { cat: "Assinatura",   tipo: "Saída" },
@@ -159,7 +145,6 @@ const MAPA_CATEGORIAS = {
   "iptu":           { cat: "Assinatura",   tipo: "Saída" },
   "mensalidade":    { cat: "Assinatura",   tipo: "Saída" },
   "seguro":         { cat: "Assinatura",   tipo: "Saída" },
-  // INVESTIMENTO
   "invest":         { cat: "Investimento", tipo: "Saída" },
   "poupanca":       { cat: "Investimento", tipo: "Saída" },
   "cdb":            { cat: "Investimento", tipo: "Saída" },
@@ -167,7 +152,6 @@ const MAPA_CATEGORIAS = {
   "acoes":          { cat: "Investimento", tipo: "Saída" },
   "cripto":         { cat: "Investimento", tipo: "Saída" },
   "bitcoin":        { cat: "Investimento", tipo: "Saída" },
-  // OUTROS
   "shopee":         { cat: "Outros",       tipo: "Saída" },
   "mercado livre":  { cat: "Outros",       tipo: "Saída" },
   "americanas":     { cat: "Outros",       tipo: "Saída" },
@@ -186,7 +170,6 @@ const NOMES_MESES = [
   "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
 ];
 
-// ── Helpers ──────────────────────────────────────────────────
 function getNomeMesAtual() {
   const d = new Date();
   d.setHours(d.getHours() - 3);
@@ -220,7 +203,6 @@ function parseValor(valorStr) {
   return isNaN(v) || v <= 0 ? null : v;
 }
 
-// ── Google Sheets ────────────────────────────────────────────
 async function garantirAba(nomeMes) {
   const meta   = await sheets.spreadsheets.get({ spreadsheetId: ID_PLANILHA });
   const existe = meta.data.sheets.some(s => s.properties.title === nomeMes);
@@ -257,7 +239,6 @@ async function gravarLinha(nomeMes, linha, valores) {
   });
 }
 
-// ── Gemini ───────────────────────────────────────────────────
 async function processarImagemComGemini(fileId) {
   const fileRes  = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${fileId}`);
   const fileJson = await fileRes.json();
@@ -282,17 +263,16 @@ async function processarImagemComGemini(fileId) {
     generationConfig: { temperature: 0, maxOutputTokens: 60 }
   };
 
-  const res    = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+  const res  = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
   );
-  const json   = await res.json();
+  const json = await res.json();
   if (json.error) throw new Error("Gemini: " + json.error.message);
   if (!json.candidates?.[0]?.content) throw new Error("Gemini retornou vazio.");
   return json.candidates[0].content.parts[0].text.trim();
 }
 
-// ── Handler de mensagens ─────────────────────────────────────
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   try {
