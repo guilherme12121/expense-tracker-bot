@@ -247,7 +247,10 @@ async function processarImagemComGemini(fileId) {
   const imgRes = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileJson.result.file_path}`);
   const imgBuf = await imgRes.buffer();
   const base64 = imgBuf.toString("base64");
-  const mime   = imgRes.headers.get("content-type") || "image/jpeg";
+  let mime = imgRes.headers.get("content-type") || "image/jpeg";
+if (!["image/jpeg","image/png","image/webp","image/gif"].includes(mime)) {
+  mime = "image/jpeg";
+}
 
   const body = {
     contents: [{ parts: [
