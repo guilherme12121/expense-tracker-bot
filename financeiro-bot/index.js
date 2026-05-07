@@ -269,19 +269,23 @@ async function processarImagemComGemini(fileId) {
     contents: [{ parts: [
       { text:
   "Extraia dados financeiros desta imagem e retorne APENAS uma linha no formato: Categoria, Estabelecimento, Valor\n\n" +
-  "Categorias disponíveis: Salario, Mercado, Farmacia, Transporte, Restaurante, Lazer, Assinatura, Invest, Outros\n\n" +
-  "Regras OBRIGATÓRIAS:\n" +
-  "1. Retorne EXATAMENTE 3 campos separados por vírgula\n" +
-  "2. Valor com PONTO decimal: 2.84 (nunca vírgula)\n" +
+   "Analise esta imagem e retorne APENAS uma linha com 3 campos: Categoria, Estabelecimento, Valor\n\n" +
+  "Categorias: Salario, Mercado, Farmacia, Transporte, Restaurante, Lazer, Assinatura, Invest, Outros\n\n" +
+  "REGRAS:\n" +
+  "1. Use PONTO como decimal: 2.84 e NAO virgula\n" +
+  "2. Retorne EXATAMENTE 3 campos separados por virgula\n" +
   "3. Sem R$, sem texto extra, sem quebra de linha\n" +
   "4. Shopee = Outros\n\n" +
-  "Exemplos:\nOutros, Shopee, 2.84\nTransporte, Uber, 22.50\nMercado, Supermercado Extra, 89.40\n\n" +
-  "Para notificações de banco: extraia o estabelecimento e valor da mensagem.\n" +
-  "Esta imagem contém: Shopee *SHPSTECNOLOGIA, R$ 2,84 → resposta: Outros, Shopee, 2.84"
+  "EXEMPLOS DE RESPOSTA CORRETA:\n" +
+  "Outros, Shopee, 2.84\n" +
+  "Transporte, Uber, 22.50\n" +
+  "Mercado, Extra, 89.40\n\n" +
+  "Se a imagem mostrar: R$ 2,84 em SHOPEE\n" +
+  "Responda: Outros, Shopee, 2.84"
 },
       { inline_data: { mime_type: mime, data: base64 } }
     ]}],
-    generationConfig: { temperature: 0, maxOutputTokens: 200 }
+    generationConfig: { temperature: 0, maxOutputTokens: 100 }
   };
 
   const res  = await fetch(
