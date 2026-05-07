@@ -281,7 +281,7 @@ async function processarImagemComGemini(fileId) {
 },
       { inline_data: { mime_type: mime, data: base64 } }
     ]}],
-    generationConfig: { temperature: 0, maxOutputTokens: 60 }
+    generationConfig: { temperature: 0, maxOutputTokens: 200 }
   };
 
   const res  = await fetch(
