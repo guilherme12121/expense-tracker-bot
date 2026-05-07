@@ -268,12 +268,17 @@ async function processarImagemComGemini(fileId) {
   const body = {
     contents: [{ parts: [
       { text:
-        "Você é um extrator de dados financeiros. Analise este comprovante e retorne " +
-        "EXATAMENTE uma linha: Categoria, Estabelecimento, Valor\n\n" +
-        "Categorias: Salario, Mercado, Farmacia, Transporte, Restaurante, Lazer, Assinatura, Invest, Outros\n\n" +
-        "Regras: ponto decimal (116.57), sem R$, sem texto extra, sem quebra de linha.\n\n" +
-        "Exemplos:\nTransporte, Posto Shell, 116.57\nMercado, Extra, 89.40\nLazer, Renner, 129.90"
-      },
+  "Extraia dados financeiros desta imagem e retorne APENAS uma linha no formato: Categoria, Estabelecimento, Valor\n\n" +
+  "Categorias disponíveis: Salario, Mercado, Farmacia, Transporte, Restaurante, Lazer, Assinatura, Invest, Outros\n\n" +
+  "Regras OBRIGATÓRIAS:\n" +
+  "1. Retorne EXATAMENTE 3 campos separados por vírgula\n" +
+  "2. Valor com PONTO decimal: 2.84 (nunca vírgula)\n" +
+  "3. Sem R$, sem texto extra, sem quebra de linha\n" +
+  "4. Shopee = Outros\n\n" +
+  "Exemplos:\nOutros, Shopee, 2.84\nTransporte, Uber, 22.50\nMercado, Supermercado Extra, 89.40\n\n" +
+  "Para notificações de banco: extraia o estabelecimento e valor da mensagem.\n" +
+  "Esta imagem contém: Shopee *SHPSTECNOLOGIA, R$ 2,84 → resposta: Outros, Shopee, 2.84"
+},
       { inline_data: { mime_type: mime, data: base64 } }
     ]}],
     generationConfig: { temperature: 0, maxOutputTokens: 60 }
