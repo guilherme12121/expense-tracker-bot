@@ -18,12 +18,14 @@ if (!TELEGRAM_TOKEN || !GEMINI_API_KEY || !ID_PLANILHA || !GOOGLE_CREDS) {
   process.exit(1);
 }
 
+// Servidor HTTP — mantém o Render acordado
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200);
   res.end("OK");
 }).listen(PORT, () => console.log(`🌐 Servidor HTTP na porta ${PORT}`));
 
+// Autenticação Google Sheets
 const credentials = JSON.parse(GOOGLE_CREDS);
 const auth = new GoogleAuth({
   credentials,
@@ -31,6 +33,7 @@ const auth = new GoogleAuth({
 });
 const sheets = google.sheets({ version: "v4", auth });
 
+// Bot Telegram com polling
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 console.log("✅ Bot iniciado.");
 
@@ -203,6 +206,7 @@ function parseValor(valorStr) {
   return isNaN(v) || v <= 0 ? null : v;
 }
 
+// Google Sheets
 async function garantirAba(nomeMes) {
   const meta   = await sheets.spreadsheets.get({ spreadsheetId: ID_PLANILHA });
   const existe = meta.data.sheets.some(s => s.properties.title === nomeMes);
@@ -239,19 +243,28 @@ async function gravarLinha(nomeMes, linha, valores) {
   });
 }
 
+// Gemini — download robusto + MIME forçado
 async function processarImagemComGemini(fileId) {
-  const fileRes  = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${fileId}`);
+  // 1. Obtém path do arquivo
+  const fileRes  = await fetch(
+    `https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${fileId}`,
+    { timeout: 10000 }
+  );
   const fileJson = await fileRes.json();
   if (!fileJson.ok) throw new Error("Arquivo não encontrado no Telegram.");
 
-  const imgRes = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileJson.result.file_path}`);
+  // 2. Baixa a imagem como ArrayBuffer para evitar problemas com node-fetch
+  const imgUrl = `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileJson.result.file_path}`;
+  const imgRes = await fetch(imgUrl, { timeout: 15000 });
+  if (!imgRes.ok) throw new Error(`Erro ao baixar imagem: ${imgRes.status}`);
+
   const imgBuf = await imgRes.buffer();
   const base64 = imgBuf.toString("base64");
-  let mime = imgRes.headers.get("content-type") || "image/jpeg";
-if (!["image/jpeg","image/png","image/webp","image/gif"].includes(mime)) {
-  mime = "image/jpeg";
-}
 
+  // 3. Força image/jpeg — fotos do Telegram são sempre JPEG
+  const mime = "image/jpeg";
+
+  // 4. Chama Gemini
   const body = {
     contents: [{ parts: [
       { text:
@@ -267,8 +280,8 @@ if (!["image/jpeg","image/png","image/webp","image/gif"].includes(mime)) {
   };
 
   const res  = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), timeout: 30000 }
   );
   const json = await res.json();
   if (json.error) throw new Error("Gemini: " + json.error.message);
@@ -276,6 +289,7 @@ if (!["image/jpeg","image/png","image/webp","image/gif"].includes(mime)) {
   return json.candidates[0].content.parts[0].text.trim();
 }
 
+// Handler de mensagens
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   try {
