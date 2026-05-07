@@ -324,6 +324,7 @@ bot.on("message", async (msg) => {
     if (!textoFinal) return;
     textoFinal = textoFinal.replace(/\r?\n/g, " ").replace(/\s{2,}/g, " ").trim();
 
+    console.log("Gemini retornou:", textoFinal);
     const partes = textoFinal.split(",");
     if (partes.length < 3) {
       await bot.sendMessage(chatId,
