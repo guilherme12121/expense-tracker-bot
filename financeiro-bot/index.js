@@ -18,14 +18,23 @@ if (!TELEGRAM_TOKEN || !GEMINI_API_KEY || !ID_PLANILHA || !GOOGLE_CREDS) {
   process.exit(1);
 }
 
-// Servidor HTTP — mantém o Render acordado
+// ── Servidor HTTP — mantém o Render acordado ─────────────────
 const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
   res.writeHead(200);
   res.end("OK");
-}).listen(PORT, () => console.log(`🌐 Servidor HTTP na porta ${PORT}`));
+});
+server.listen(PORT, () => console.log(`🌐 Servidor HTTP na porta ${PORT}`));
 
-// Autenticação Google Sheets
+// ── Auto-ping a cada 10 minutos para não hibernar ────────────
+// O Render gratuito hiberna após 15min sem requisição HTTP.
+// Este ping interno mantém o servidor ativo.
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+setInterval(() => {
+  fetch(RENDER_URL).catch(() => {});
+}, 10 * 60 * 1000);
+
+// ── Autenticação Google Sheets ───────────────────────────────
 const credentials = JSON.parse(GOOGLE_CREDS);
 const auth = new GoogleAuth({
   credentials,
@@ -33,7 +42,7 @@ const auth = new GoogleAuth({
 });
 const sheets = google.sheets({ version: "v4", auth });
 
-// Bot Telegram com polling
+// ── Bot Telegram com polling ─────────────────────────────────
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 console.log("✅ Bot iniciado.");
 
@@ -206,7 +215,18 @@ function parseValor(valorStr) {
   return isNaN(v) || v <= 0 ? null : v;
 }
 
-// Google Sheets
+// ── Detecta parcelamento: "2x de 65,76" → retorna parcela ────
+// Suporta: "2x65", "2x 65", "2x de 65", "2x de 65,76"
+function detectarParcela(texto) {
+  const match = texto.match(/(\d+)\s*[xX]\s*(?:de\s*)?([\d.,]+)/);
+  if (!match) return null;
+  const parcelas = parseInt(match[1]);
+  const valor    = parseValor(match[2]);
+  if (!valor || parcelas < 2) return null;
+  return { parcelas, valorParcela: valor, valorTotal: valor * parcelas };
+}
+
+// ── Google Sheets ────────────────────────────────────────────
 async function garantirAba(nomeMes) {
   const meta   = await sheets.spreadsheets.get({ spreadsheetId: ID_PLANILHA });
   const existe = meta.data.sheets.some(s => s.properties.title === nomeMes);
@@ -243,9 +263,8 @@ async function gravarLinha(nomeMes, linha, valores) {
   });
 }
 
-// Gemini — download robusto + MIME forçado
+// ── Gemini ───────────────────────────────────────────────────
 async function processarImagemComGemini(fileId) {
-  // 1. Obtém path do arquivo
   const fileRes  = await fetch(
     `https://api.telegram.org/bot${TELEGRAM_TOKEN}/getFile?file_id=${fileId}`,
     { timeout: 10000 }
@@ -253,7 +272,6 @@ async function processarImagemComGemini(fileId) {
   const fileJson = await fileRes.json();
   if (!fileJson.ok) throw new Error("Arquivo não encontrado no Telegram.");
 
-  // 2. Baixa a imagem como ArrayBuffer para evitar problemas com node-fetch
   const imgUrl = `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${fileJson.result.file_path}`;
   const imgRes = await fetch(imgUrl, { timeout: 15000 });
   if (!imgRes.ok) throw new Error(`Erro ao baixar imagem: ${imgRes.status}`);
@@ -261,31 +279,30 @@ async function processarImagemComGemini(fileId) {
   const imgBuf = await imgRes.buffer();
   const base64 = imgBuf.toString("base64");
 
-  // 3. Força image/jpeg — fotos do Telegram são sempre JPEG
-  const mime = "image/jpeg";
-
-  // 4. Chama Gemini
   const body = {
     contents: [{ parts: [
       { text:
-  "Extraia dados financeiros desta imagem e retorne APENAS uma linha no formato: Categoria, Estabelecimento, Valor\n\n" +
-   "Analise esta imagem e retorne APENAS uma linha com 3 campos: Categoria, Estabelecimento, Valor\n\n" +
-  "Categorias: Salario, Mercado, Farmacia, Transporte, Restaurante, Lazer, Assinatura, Invest, Outros\n\n" +
-  "REGRAS:\n" +
-  "1. Use PONTO como decimal: 2.84 e NAO virgula\n" +
-  "2. Retorne EXATAMENTE 3 campos separados por virgula\n" +
-  "3. Sem R$, sem texto extra, sem quebra de linha\n" +
-  "4. Shopee = Outros\n\n" +
-  "EXEMPLOS DE RESPOSTA CORRETA:\n" +
-  "Outros, Shopee, 2.84\n" +
-  "Transporte, Uber, 22.50\n" +
-  "Mercado, Extra, 89.40\n\n" +
-  "Se a imagem mostrar: R$ 2,84 em SHOPEE\n" +
-  "Responda: Outros, Shopee, 2.84"
-},
-      { inline_data: { mime_type: mime, data: base64 } }
+        "Você é um extrator de comprovantes financeiros.\n" +
+        "Leia esta imagem e responda APENAS com uma linha neste formato exato:\n" +
+        "CATEGORIA|ESTABELECIMENTO|VALOR\n\n" +
+        "Use PIPE (|) como separador.\n" +
+        "Categorias aceitas: Salario, Mercado, Farmacia, Transporte, Restaurante, Lazer, Assinatura, Invest, Outros\n" +
+        "Valor: use PONTO como decimal (ex: 2.84). Nunca use virgula no valor.\n" +
+        "Sem R$, sem texto extra, sem explicação, sem quebra de linha.\n\n" +
+        "Exemplos de resposta correta:\n" +
+        "Outros|Shopee|2.84\n" +
+        "Transporte|Uber|22.50\n" +
+        "Mercado|Hiperideal|12.78\n" +
+        "Restaurante|iFood|29.37\n\n" +
+        "Se for notificação de banco, extraia o estabelecimento e o valor da mensagem."
+      },
+      { inline_data: { mime_type: "image/jpeg", data: base64 } }
     ]}],
-    generationConfig: { temperature: 0, maxOutputTokens: 500 }
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: 100,
+      thinkingConfig: { thinkingBudget: 0 }
+    }
   };
 
   const res  = await fetch(
@@ -295,10 +312,15 @@ async function processarImagemComGemini(fileId) {
   const json = await res.json();
   if (json.error) throw new Error("Gemini: " + json.error.message);
   if (!json.candidates?.[0]?.content) throw new Error("Gemini retornou vazio.");
-  return json.candidates[0].content.parts[0].text.trim();
+
+  const texto = json.candidates[0].content.parts[0].text.trim();
+  console.log("Gemini imagem retornou:", texto);
+
+  // Converte pipe para vírgula se necessário
+  return texto.includes("|") ? texto.replace(/\|/g, ",") : texto;
 }
 
-// Handler de mensagens
+// ── Handler de mensagens ─────────────────────────────────────
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   try {
@@ -315,7 +337,9 @@ bot.on("message", async (msg) => {
       textoFinal = msg.text.trim();
       if (textoFinal.startsWith("/")) {
         await bot.sendMessage(chatId,
-          "ℹ️ Formato:\nCategoria, Item, Valor\n\nEx: Mercado, Padaria, 35.90\n\nOu envie foto do comprovante."
+          "ℹ️ Formato:\nCategoria, Item, Valor\n\nEx: Mercado, Padaria, 35.90\n" +
+          "Parcelado: Loja, Renner, 2x de 65.76\n\n" +
+          "Ou envie foto do comprovante."
         );
         return;
       }
@@ -323,12 +347,45 @@ bot.on("message", async (msg) => {
 
     if (!textoFinal) return;
     textoFinal = textoFinal.replace(/\r?\n/g, " ").replace(/\s{2,}/g, " ").trim();
+    console.log("Processando:", textoFinal);
 
-    console.log("Gemini retornou:", textoFinal);
+    // ── Detecta parcelamento no texto ───────────────────────
+    const parcelamento = detectarParcela(textoFinal);
+    if (parcelamento) {
+      // Extrai categoria e item (antes do Nx)
+      const semParcela = textoFinal.replace(/\d+\s*[xX]\s*(?:de\s*)?[\d.,]+/, "").replace(/,\s*,/g, ",").trim().replace(/,\s*$/, "");
+      const partesBase = semParcela.split(",");
+      if (partesBase.length >= 2) {
+        const inputCat  = partesBase[0].trim();
+        const item      = partesBase[1].trim();
+        const { cat: categoria, tipo } = resolverCategoria(inputCat);
+        const nomeMes   = getNomeMesAtual();
+        const dataStr   = getDataAtual();
+        const obs       = `${parcelamento.parcelas}x de R$ ${parcelamento.valorParcela.toFixed(2).replace(".",",")}`;
+
+        await garantirAba(nomeMes);
+        const linha = await proximaLinhaVazia(nomeMes);
+        if (linha === -1) {
+          await bot.sendMessage(chatId, `❌ Planilha de ${nomeMes} cheia!`);
+          return;
+        }
+        await gravarLinha(nomeMes, linha, [dataStr, categoria, item, parcelamento.valorParcela, tipo, obs]);
+        await bot.sendMessage(chatId,
+          `💸 Lançado!\n\n` +
+          `📁 ${categoria} › ${item}\n` +
+          `💵 R$ ${parcelamento.valorParcela.toFixed(2).replace(".",",")} (parcela 1/${parcelamento.parcelas})\n` +
+          `💳 Total: R$ ${parcelamento.valorTotal.toFixed(2).replace(".",",")}\n` +
+          `📅 ${dataStr} (${nomeMes})`
+        );
+        return;
+      }
+    }
+
+    // ── Parse normal ─────────────────────────────────────────
     const partes = textoFinal.split(",");
     if (partes.length < 3) {
       await bot.sendMessage(chatId,
-        `⚠️ Formato inválido: "${textoFinal}"\n\nUse: Categoria, Item, Valor\nEx: Mercado, Padaria, 35.90`
+        `⚠️ Formato inválido: "${textoFinal}"\n\nUse: Categoria, Item, Valor\nEx: Mercado, Padaria, 35.90\nParcelado: Loja, Renner, 2x de 65.76`
       );
       return;
     }
@@ -349,14 +406,12 @@ bot.on("message", async (msg) => {
 
     await garantirAba(nomeMes);
     const linha = await proximaLinhaVazia(nomeMes);
-
     if (linha === -1) {
       await bot.sendMessage(chatId, `❌ Planilha de ${nomeMes} cheia! Adicione mais linhas.`);
       return;
     }
 
     await gravarLinha(nomeMes, linha, [dataStr, categoria, item, valor, tipo, ""]);
-
     await bot.sendMessage(chatId,
       `${tipo === "Entrada" ? "💰" : "💸"} Lançado!\n\n` +
       `📁 ${categoria} › ${item}\n` +
